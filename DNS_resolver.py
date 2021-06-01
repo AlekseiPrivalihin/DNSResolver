@@ -41,7 +41,7 @@ while True:
         cache[msg] = (ans, expiration_time)
 
     udp_socket.sendto(cache[msg][0].encode(), addr)
-    print('answer ' + cache[msg][0] + ' given for the query')
+    print('answer "' + cache[msg][0] + '" given for the query')
     
 udp_socket.close()
 print('shutting down server')

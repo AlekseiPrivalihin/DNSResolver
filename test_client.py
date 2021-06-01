@@ -19,7 +19,7 @@ while True:
     msgB, addr = udp_socket.recvfrom(1024)
     msg = msgB.decode()
     msg = "".join(msg)
-    print('recieved "' + msg + '" answer from ' + addr[0] + ':' + str(addr[1]))
+    print('received "' + msg + '" answer from ' + addr[0] + ':' + str(addr[1]))
 
 udp_socket.close()
 print('Shutting down client')

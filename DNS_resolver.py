@@ -20,7 +20,7 @@ while True:
     msgB, addr = udp_socket.recvfrom(1024)
     msg = msgB.decode()
     msg = "".join(msg)
-    print('recieved ' + msg + ' query from ' + addr[0] + ':' + str(addr[1]))
+    print('received ' + msg + ' query from ' + addr[0] + ':' + str(addr[1]))
     if msg == 'KYS':
         udp_socket.sendto(b'server shutting down', addr)
         break

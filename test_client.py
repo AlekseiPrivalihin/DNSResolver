@@ -7,6 +7,7 @@ host_addr = (host, host_port)
 send_addr = (host, send_port)
 udp_socket = socket(AF_INET, SOCK_DGRAM)
 udp_socket.bind(send_addr)
+udp_socket.settimeout(10)
 
 while True:
     print('Please input query or Q to quit')

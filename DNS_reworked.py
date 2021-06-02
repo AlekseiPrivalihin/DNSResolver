@@ -7,7 +7,7 @@ port = 53
 host_addr = (host, port)
 default_rdclass = 1
 default_timeout_sec = 3
-default_expiration_sec = 30
+default_expiration_sec = 60
 dns_cache = resolver.LRUCache()
 ROOT_SERVERS = ("198.41.0.4",
                 "199.9.14.201",
@@ -31,7 +31,7 @@ def get_response(dname, rdtype, ip_stack = []):
     cached_ans = dns_cache.get(cache_key)
     if cached_ans != None:
         if time.time() < cached_ans.expiration:
-            print('cache hit!')
+            # print('cache hit!')
             return cached_ans.response
         
     if ip_stack == []:
@@ -41,20 +41,23 @@ def get_response(dname, rdtype, ip_stack = []):
     been_there = set()
     while len(ip_stack) > 0:
         if time.time() > time_to_die_sec:
-            return None
+            pass
+            # return None
         cur_ip = ip_stack.pop()
         if (cur_ip in been_there):
             continue
 
-        print(cur_ip)
+        # print(cur_ip + '<><><><><><><><><><><><><><><><><><><><><><><><><>')
         been_there.add(cur_ip)
         dns_query = message.make_query(dname, rdtype)
         try:
             response = query.udp(dns_query, cur_ip, default_timeout_sec)
+            # print(response)
         except:
+            # print('NO ANSWER')
             continue
 
-        print(response)
+        # print(response)
         if response.answer:
             res_def = set()
             for res in response.answer:
@@ -84,7 +87,7 @@ def get_response(dname, rdtype, ip_stack = []):
                     if add.rdtype == rdatatype.A or add.rdtype == rdatatype.AAAA:
                         for add_ip in add:
                             ip_stack.append(str(add_ip))
-        elif False and response.authority:
+        elif response.authority:
             for auth in response.authority:
                 if auth.rdtype == rdatatype.NS:
                     for auth_name in auth:
@@ -103,38 +106,40 @@ def get_response(dname, rdtype, ip_stack = []):
             
         
 def main():
+    udp_socket = query._make_socket(af=AF_INET, type=SOCK_DGRAM, source=host_addr)
     try:
         while True:
-            print('trying to get query')
-            udp_socket = socket(AF_INET, SOCK_DGRAM)
-            udp_socket.bind(host_addr)
+            # print('trying to get query')
+            # udp_socket = socket(AF_INET, SOCK_DGRAM)
+            # udp_socket.bind(host_addr)
             msg, t, addr = query.receive_udp(udp_socket)
             request = msg.question[0]
             request_name = request.name
-            if request_name.to_text() != 'time.windows.com.':
-                continue
+            # if request_name.to_text() != 'may.ns.cloudflare.com.':
+            #     continue
 
-            print(request_name)
+            # print(request_name)
             requested_rdtype = request.rdtype
             response_data = get_response(request_name, requested_rdtype)
             response = message.make_response(msg)
             if response_data == None:
-                print('Found nothing! Negative caching.')
+                # print('Found nothing! Negative caching.')
                 cache_key = (request_name, requested_rdtype, default_rdclass)
                 cache_empty_ans = resolver.Answer(request_name, requested_rdtype, default_rdclass, response)
             else:
                 response.answer = response_data.answer
                 response.authority = response_data.authority
                 response.additional = response_data.additional
-                print(response)
+                # print(response)
             query.send_udp(udp_socket, response, addr)
-            udp_socket.close()
-            break
+            # udp_socket.close()
+            # break
         udp_socket.close()
-        print('shutting down server')
+        # print('shutting down server')
     except Exception as e:
+        udp_socket.close()
         print(str(e))
-        print('emergency shutdown!')
+        # print('emergency shutdown!')
         raise e
 
 main()

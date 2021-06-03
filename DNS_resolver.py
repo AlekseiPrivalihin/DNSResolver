@@ -1,159 +1,135 @@
 from socket import *
 from dns import resolver, message, name, rdatatype, query, rrset
 import time
-# 192.168.31.1
+
 host = '127.0.0.1'
 port = 53
 host_addr = (host, port)
-cache = {}
-ROOT_SERVERS = (["198.41.0.4",
-                    "199.9.14.201",
-                    "192.33.4.12",
-                    "199.7.91.13",
-                    "192.203.230.10",
-                    "192.5.5.241",
-                    "192.112.36.4",
-                    "198.97.190.53",
-                    "192.36.148.17",
-                    "192.58.128.30",
-                    "193.0.14.129",
-                    "199.7.83.42",
-                    "202.12.27.33"],
-                [])
-                
+default_rdclass = 1
+default_timeout_sec = 3
+dns_cache = resolver.LRUCache()
+ROOT_SERVERS = ("198.41.0.4",
+                "199.9.14.201",
+                "192.33.4.12",
+                "199.7.91.13",
+                "192.203.230.10",
+                "192.5.5.241",
+                "192.112.36.4",
+                "198.97.190.53",
+                "192.36.148.17",
+                "192.58.128.30",
+                "193.0.14.129",
+                "199.7.83.42",
+                "202.12.27.33"
+                )
 
-def get_IP(domains_list, cur_idx = -1):
-    domain_name = ".".join(domains_list)
-    to_look_up = ".".join(domains_list[cur_idx:])
-    if to_look_up in cache.keys(): # and time.time() < cache[to_look_up][1]:
-        print('Found IP adress for ' + to_look_up + ' in cache!')
-        print(cache)
-        if cur_idx + len(domains_list) == 0:
-            return cache[to_look_up]
-        else:
-            return get_IP(domains_list, cur_idx - 1)
 
-    try_IPs = ([], [])
-    if cur_idx == -1:
-        try_IPs = ROOT_SERVERS
-    else:
-        try_IPs = cache[".".join(domains_list[cur_idx + 1:])]
+def get_response(dname, rdtype, ip_stack = []):
+    cache_key = (dname, rdtype, default_rdclass)
+    cached_ans = dns_cache.get(cache_key)
+    if cached_ans != None:
+        if time.time() < cached_ans.expiration:
+            return cached_ans.response
+        
+    if ip_stack == []:
+        ip_stack = list(ROOT_SERVERS)
 
-    # IPv4
-    received_IPs = ([], [])
-    for ip in try_IPs[0] + try_IPs[1]:
+    been_there = set()
+    while len(ip_stack) > 0:
+        cur_ip = ip_stack.pop()
+        if (cur_ip in been_there):
+            continue
+
+        been_there.add(cur_ip)
+        dns_query = message.make_query(dname, rdtype)
         try:
-            IPv4_query = message.make_query(name.from_text(domain_name), rdatatype.A)
-            response = query.udp(IPv4_query, ip, 3)
-            print(response.to_text())
-            if response.answer:
-                print('Wooo!')
-                for received_IP in response.answer:
-                    if received_IP.rdtype == rdatatype.A:
-                        received_IPs[0].append(received_IP.to_text().split('IN A ')[1].split('\n')[0])
-
-                break
-            elif response.additional:
-                print('Eeeh')
-                for received_IP in response.additional:
-                    if received_IP.rdtype == rdatatype.A:
-                        received_IPs[0].append(received_IP.to_text().split('IN A ')[1].split('\n')[0])
-                    elif received_IP.rdtype == rdatatype.AAAA:
-                        received_IPs[1].append(received_IP.to_text().split('IN AAAA ')[1].split('\n')[0])
-
-                break
-            elif response.authority:
-                print('UUUGH')
-                for authority_address in response.authority:
-                    authority_name = authority_address.to_text().split('IN NS')[1].split('\n')[0]
-                    authority_domain_list = authority_name.split('.')[:-2]
-                    try_more_IPs = get_IP(authority_domain_list)
-                    try_IPs[0] += try_more_IPs[0]
-                    try_IPs[1] += try_more_IPs[1]
-
-            '''
-            IPv6_query = message.make_query(name.from_text(domains_list[0]), rdatatype.AAAA)
-            response = query.udp(IPv6_query, ip, 3)
-            if response.answer:
-                for received_IP in response.answer:
-                    if received_IP.rdtype == rdatatype.AAAA:
-                        received_IPs[1].append(received_IP.to_text().split('IN AAAA ')[1].split('\n')[0])
-
-                break
-            elif response.additional:
-                for received_IP in response.additional:
-                    print(received_IP.rdtype)
-                    if received_IP.rdtype == rdatatype.A:
-                        received_IPs[0].append(received_IP.to_text().split('IN A ')[1].split('\n')[0])
-                    elif received_IP.rdtype == rdatatype.AAAA:
-                        received_IPs[1].append(received_IP.to_text().split('IN AAAA ')[1].split('\n')[0])
-
-                break
-            '''
-            
+            response = query.udp(dns_query, cur_ip, default_timeout_sec)
         except:
             continue
 
-    if len(received_IPs[0]) + len(received_IPs[1]) > 0:
-        cache[to_look_up] = received_IPs
-    else:
-        return ([], [])
+        if response.answer:
+            res_def = set()
+            for res in response.answer:
+                res_def.add(res.name.to_text())
 
-    print(to_look_up)
-    print(cache[to_look_up])
-    if cur_idx + len(domains_list) == 0:
-        return received_IPs
-    else:
-        return get_IP(domains_list, cur_idx - 1)
+            all_resolved = True
+            for res in response.answer:
+                if res.rdtype == rdatatype.CNAME and res[0].to_text() not in res_def:
+                    res_response = get_response(res[0], rdtype)
+                    if res_response == None:
+                        all_resolved = False
+                        break
+                    for res_res in res_response.answer:
+                        if res_res.rdtype == rdatatype.A or res_res.rdtype == rdatatype.AAAA:
+                            res_def.add(res_res.name)
+                    response.answer += res_response.answer
+                    response.authority += res_response.authority
+                    response.additional += res_response.additional
 
+            if not all_resolved:
+                continue
+            ans = resolver.Answer(dname, rdtype, default_rdclass, response)
+            dns_cache.put(cache_key, ans)
+            return response
+        elif response.additional:
+            for add in response.additional:
+                    if add.rdtype == rdatatype.A or add.rdtype == rdatatype.AAAA:
+                        for add_ip in add:
+                            ip_stack.append(str(add_ip))
+        elif response.authority:
+            for auth in response.authority:
+                if auth.rdtype == rdatatype.NS:
+                    for auth_name in auth:
+                        auth_resp = get_response(auth_name, rdatatype.A)
+                        if auth_resp != None and auth_resp.answer:
+                            for auth_ans in auth_resp.answer:
+                                if auth_ans.rdtype == rdatatype.A or auth_ans.rdtype == rdatatype.AAAA:
+                                    for auth_ip in auth_ans:
+                                        ip_stack.append(str(auth_ip))
+                            break
+                elif auth.rdtype == rdatatype.SOA:
+                    ans = resolver.Answer(dname, rdtype, default_rdclass, response)
+                    dns_cache.put(cache_key, ans)
+                    return response
+
+    # negative caching
+    dname_safe = name.from_text(dname.to_text())
+    dummy_msg = message.make_query(dname_safe, rdtype)
+    dummy_response = message.make_response(dummy_msg)
+    ans = resolver.Answer(dname_safe, rdtype, default_rdclass, dummy_response)
+    dns_cache.put(cache_key, ans)
+    return None
+            
+        
 def main():
+    udp_socket = query._make_socket(af=AF_INET, type=SOCK_DGRAM, source=host_addr)
+    time.sleep(3)
     try:
         while True:
-            print('awaiting query...')
-            # msgB, addr = udp_socket.recvfrom(1024)
-            udp_socket = socket(AF_INET, SOCK_DGRAM)
-            udp_socket.bind(host_addr)
-            msg, t, addr = query.receive_udp(udp_socket)
-            print('got query')
-            # msg = message.from_wire(msgB)
-            # print('received "' + msg.to_text() + '" query from ' + addr[0] + ':' + str(addr[1]))
+            try:
+                msg, t, addr = query.receive_udp(udp_socket)
+            except:
+                udp_socket.close()
+                udp_socket = query._make_socket(af=AF_INET, type=SOCK_DGRAM, source=host_addr)
+                time.sleep(3)
+                msg, t, addr = query.receive_udp(udp_socket)
             request = msg.question[0]
-            domains_list = request.to_text()[0:-6].split('.')
-            domains_list = ['fclmnews', 'ru']
-            domain_name = ".".join(domains_list)
-
-            IP_list = get_IP(domains_list)
-            print(IP_list[0])
-            print(IP_list[1])
-            break
-
+            request_name = request.name
+            requested_rdtype = request.rdtype
+            response_data = get_response(request_name, requested_rdtype)
             response = message.make_response(msg)
-            response_txt = response.to_text().split(';ANSWER\n')
-            response_str = response_txt[0] + ';ANSWER\n'
-            if (len(IP_list[0]) + len(IP_list[1])) == 0:
-                print('found nothing!')
+            if response_data == None:
+                pass
             else:
-                response.answer = []
-                for ip in IP_list[0]:
-                    response_str += domain_name + '. IN A ' + ip + '\n'
-                for ip in IP_list[1]:
-                    response_str += domain_name + '. IN AAAA ' + ip + '\n'
-        
-            response_str = response_str + response_txt[1]
-            # print('answer "' + response_str + '" given for the query')
-            msg_response = message.from_text(response_str)
-            print('trying to send response')
-            query.send_udp(udp_socket, msg_response, addr)
-            udp_socket.close()
-            print('response sent')
-            # udp_socket.sendto(msg_response.to_wire('me'), addr)
-    
+                response.answer = response_data.answer
+                response.authority = response_data.authority
+                response.additional = response_data.additional
+            query.send_udp(udp_socket, response, addr)
         udp_socket.close()
-        print('shutting down server')
     except Exception as e:
-        print(str(e))
-        print('emergency shutdown!')
         udp_socket.close()
+        print(str(e))
         raise e
 
-main()
+if __name__ == "__main__":
+    main()

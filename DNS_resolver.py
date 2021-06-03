@@ -7,6 +7,8 @@ port = 53
 host_addr = (host, port)
 default_rdclass = 1
 default_timeout_sec = 3
+response_timeout_sec = 60
+current_request_expiration = 0
 dns_cache = resolver.LRUCache()
 ROOT_SERVERS = ("198.41.0.4",
                 "199.9.14.201",
@@ -29,6 +31,7 @@ def get_response(dname, rdtype, ip_stack = []):
     cached_ans = dns_cache.get(cache_key)
     if cached_ans != None:
         if time.time() < cached_ans.expiration:
+            print('cache hit!')
             return cached_ans.response
         
     if ip_stack == []:
@@ -36,6 +39,10 @@ def get_response(dname, rdtype, ip_stack = []):
 
     been_there = set()
     while len(ip_stack) > 0:
+        if time.time() > current_request_expiration:
+            print(current_request_expiration)
+            print(time.time())
+            break
         cur_ip = ip_stack.pop()
         if (cur_ip in been_there):
             continue
@@ -55,7 +62,7 @@ def get_response(dname, rdtype, ip_stack = []):
             all_resolved = True
             for res in response.answer:
                 if res.rdtype == rdatatype.CNAME and res[0].to_text() not in res_def:
-                    res_response = get_response(res[0], rdtype)
+                    res_response = get_response(name.from_text(res[0].to_text()), rdtype)
                     if res_response == None:
                         all_resolved = False
                         break
@@ -80,7 +87,7 @@ def get_response(dname, rdtype, ip_stack = []):
             for auth in response.authority:
                 if auth.rdtype == rdatatype.NS:
                     for auth_name in auth:
-                        auth_resp = get_response(auth_name, rdatatype.A)
+                        auth_resp = get_response(name.from_text(auth_name.to_text()), rdatatype.A)
                         if auth_resp != None and auth_resp.answer:
                             for auth_ans in auth_resp.answer:
                                 if auth_ans.rdtype == rdatatype.A or auth_ans.rdtype == rdatatype.AAAA:
@@ -93,15 +100,15 @@ def get_response(dname, rdtype, ip_stack = []):
                     return response
 
     # negative caching
-    dname_safe = name.from_text(dname.to_text())
-    dummy_msg = message.make_query(dname_safe, rdtype)
+    dummy_msg = message.make_query(dname, rdtype)
     dummy_response = message.make_response(dummy_msg)
-    ans = resolver.Answer(dname_safe, rdtype, default_rdclass, dummy_response)
+    ans = resolver.Answer(dname, rdtype, default_rdclass, dummy_response)
     dns_cache.put(cache_key, ans)
     return None
             
         
 def main():
+    global current_request_expiration
     udp_socket = query._make_socket(af=AF_INET, type=SOCK_DGRAM, source=host_addr)
     time.sleep(3)
     try:
@@ -115,15 +122,19 @@ def main():
                 msg, t, addr = query.receive_udp(udp_socket)
             request = msg.question[0]
             request_name = request.name
+            print(request_name)
             requested_rdtype = request.rdtype
+            current_request_expiration = time.time() + response_timeout_sec
             response_data = get_response(request_name, requested_rdtype)
             response = message.make_response(msg)
             if response_data == None:
+                print('found nothing')
                 pass
             else:
                 response.answer = response_data.answer
                 response.authority = response_data.authority
                 response.additional = response_data.additional
+                print(response)
             query.send_udp(udp_socket, response, addr)
         udp_socket.close()
     except Exception as e:
